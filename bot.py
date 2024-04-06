@@ -3,8 +3,8 @@ import os
 import uuid
 from dotenv import load_dotenv
 from datetime import datetime
-from telegram import Update
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
+from telegram import ReplyKeyboardMarkup, Update
+from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters,ConversationHandler
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -16,10 +16,21 @@ load_dotenv()
 
 expenses = {}
 category_limits = {}
+EXPENSE_AMOUNT, EXPENSE_CATEGORY, EXPENSE_DESCRIPTION, EXPENSE_FREQUENCY = range(4)
+LIMIT_CATEGORY, LIMIT_AMOUNT = range(2)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"User {update.effective_user.id} started the bot")
-    await context.bot.send_message(chat_id=update.effective_chat.id, text="Welcome to the Expense Tracker Bot! Use /help to see available commands.")
+    keyboard = [
+        ['/add', '/addrecurring'],
+        ['/delete', '/total'],
+        ['/category', '/month'],
+        ['/report', '/setlimit'],
+        ['/limits', '/clear'],
+        ['/help']
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="Welcome to the Expense Tracker Bot!", reply_markup=reply_markup)
 
 async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"User {update.effective_user.id} requested help")
@@ -35,7 +46,89 @@ async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "/setlimit <category> <limit> - Set a limit for a category\n" \
                 "/limits - View current limits for each category"
     await context.bot.send_message(chat_id=update.effective_chat.id, text=help_text)
+async def add_expense_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="Please enter the expense amount:")
+    return EXPENSE_AMOUNT
 
+async def add_expense_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['amount'] = float(update.message.text)
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="Please enter the expense category:")
+    return EXPENSE_CATEGORY
+
+async def add_expense_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['category'] = update.message.text
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="Please enter the expense description:")
+    return EXPENSE_DESCRIPTION
+
+async def add_expense_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    description = update.message.text
+    amount = context.user_data['amount']
+    category = context.user_data['category']
+    expense_id = str(uuid.uuid4())
+    expense = (expense_id, amount, category, description, datetime.now().strftime("%Y-%m"))
+    if update.effective_user.id not in expenses:
+        expenses[update.effective_user.id] = []
+    expenses[update.effective_user.id].append(expense)
+    logger.info(f"User {update.effective_user.id} added an expense: {expense}")
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Expense of {amount} for {description} in category {category} added.")
+    if category in category_limits and amount > category_limits[category]:
+        logger.warning(f"User {update.effective_user.id} exceeded the limit for category {category}")
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Warning: Expense exceeds the limit for category {category}!")
+    return ConversationHandler.END
+
+async def add_recurring_expense_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="Please enter the recurring expense amount:")
+    return EXPENSE_AMOUNT
+
+async def add_recurring_expense_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['amount'] = float(update.message.text)
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="Please enter the recurring expense category:")
+    return EXPENSE_CATEGORY
+
+async def add_recurring_expense_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['category'] = update.message.text
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="Please enter the recurring expense description:")
+    return EXPENSE_DESCRIPTION
+
+async def add_recurring_expense_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['description'] = update.message.text
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="Please enter the recurring expense frequency:")
+    return EXPENSE_FREQUENCY
+
+async def add_recurring_expense_frequency(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    frequency = update.message.text
+    amount = context.user_data['amount']
+    category = context.user_data['category']
+    description = context.user_data['description']
+    expense_id = str(uuid.uuid4())
+    expense = (expense_id, amount, category, description, datetime.now().strftime("%Y-%m"), frequency)
+    if update.effective_user.id not in expenses:
+        expenses[update.effective_user.id] = []
+    expenses[update.effective_user.id].append(expense)
+    logger.info(f"User {update.effective_user.id} added a recurring expense: {expense}")
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Recurring expense of {amount} for {description} in category {category} added with frequency {frequency}.")
+    return ConversationHandler.END
+
+async def set_limit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="Please enter the category for the limit:")
+    return LIMIT_CATEGORY
+
+async def set_limit_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['category'] = update.message.text
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="Please enter the limit amount:")
+    return LIMIT_AMOUNT
+
+async def set_limit_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    category = context.user_data['category']
+    limit = float(update.message.text)
+    category_limits[category] = limit
+    logger.info(f"User {update.effective_user.id} set a limit of {limit} for category {category}")
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Limit for category {category} set to {limit}.")
+    return ConversationHandler.END
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_message(chat_id=update.effective_chat.id, text="Operation cancelled.")
+    return ConversationHandler.END
 async def add_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         amount = float(context.args[0])
@@ -240,14 +333,40 @@ if __name__ == '__main__':
     start_handler = CommandHandler('start', start)
     application.add_handler(start_handler)
 
-    help_handler = CommandHandler('help', help)
-    application.add_handler(help_handler)
+    add_expense_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('add', add_expense_start)],
+        states={
+            EXPENSE_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_expense_amount)],
+            EXPENSE_CATEGORY: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_expense_category)],
+            EXPENSE_DESCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_expense_description)]
+        },
+        fallbacks=[CommandHandler('cancel', cancel)]
+    )
+    application.add_handler(add_expense_conv_handler)
 
-    add_expense_handler = CommandHandler('add', add_expense)
-    application.add_handler(add_expense_handler)
+    add_recurring_expense_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('addrecurring', add_recurring_expense_start)],
+        states={
+            EXPENSE_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_recurring_expense_amount)],
+            EXPENSE_CATEGORY: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_recurring_expense_category)],
+            EXPENSE_DESCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_recurring_expense_description)],
+            EXPENSE_FREQUENCY: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_recurring_expense_frequency)]
+        },
+        fallbacks=[CommandHandler('cancel', cancel)]
+    )
+    application.add_handler(add_recurring_expense_conv_handler)
 
-    add_recurring_expense_handler = CommandHandler('addrecurring', add_recurring_expense)
-    application.add_handler(add_recurring_expense_handler)
+    set_limit_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('setlimit', set_limit_start)],
+        states={
+            LIMIT_CATEGORY: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_limit_category)],
+            LIMIT_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_limit_amount)]
+        },
+        fallbacks=[CommandHandler('cancel', cancel)]
+    )
+    application.add_handler(set_limit_conv_handler)
+  
+
 
     delete_expense_handler = CommandHandler('delete', delete_expense)
     application.add_handler(delete_expense_handler)
