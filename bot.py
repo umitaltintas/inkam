@@ -26,18 +26,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"User {update.effective_user.id} requested help")
-    help_text = "Available commands:\n" \
-                "/add <amount> <category> <description> - Add an expense\n" \
-                "/addrecurring <amount> <category> <description> <frequency> - Add a recurring expense\n" \
-                "/delete <expense_id> - Delete an expense\n" \
-                "/total - Get total of all expenses\n" \
-                "/category <category> - View expenses for a specific category\n" \
-                "/month <month> <year> - View expenses for a specific month\n" \
-                "/clear - Clear all expenses\n" \
-                "/report - Generate a monthly expense report\n" \
-                "/setlimit <category> <limit> - Set a limit for a category\n" \
-                "/limits - View current limits for each category"
-    await context.bot.send_message(chat_id=update.effective_chat.id, text=help_text)
+
+    markdown_help_text = "Available commands:\n\n" \
+                         "/add `<amount>` `<category>` `<description>` - Add an expense\n" \
+                         "/addrecurring `<amount>` `<category>` `<description>` `<frequency>` - Add a recurring expense\n" \
+                         "/delete `<expense_id>` - Delete an expense\n" \
+                         "/total - Get total of all expenses\n" \
+                         "/category `<category>` - View expenses for a specific category\n" \
+                         "/month `<month>` `<year>` - View expenses for a specific month\n" \
+                         "/clear - Clear all expenses\n" \
+                         "/report - Generate a monthly expense report\n" \
+                         "/setlimit `<category>` `<limit>` - Set a limit for a category\n" \
+                         "/limits - View current limits for each category\n" \
+                         "/export - Export expenses to CSV"
+
+    await context.bot.send_message(chat_id=update.effective_chat.id, text=markdown_help_text, parse_mode="Markdown")
 
 async def add_expense(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -229,6 +232,21 @@ async def view_limits(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"User {update.effective_user.id} tried to view category limits but none are set")
         await context.bot.send_message(chat_id=update.effective_chat.id, text="No category limits set.")
 
+#export csv
+async def export_csv(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id in expenses:
+        with open(f'{user_id}_expenses.csv', 'w') as file:
+            file.write("ID,Amount,Category,Description,Month,Frequency\n")
+            for expense in expenses[user_id]:
+                file.write(','.join(map(str, expense)) + '\n')
+        logger.info(f"User {user_id} exported expenses to CSV")
+        await context.bot.send_document(chat_id=update.effective_chat.id, document=open(f'{user_id}_expenses.csv', 'rb'))
+    else:
+        logger.warning(f"User {user_id} tried to export expenses but has no recorded expenses")
+        await context.bot.send_message(chat_id=update.effective_chat.id, text="You have no recorded expenses.")
+        
+
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.warning(f"User {update.effective_user.id} sent an unknown command")
     await context.bot.send_message(chat_id=update.effective_chat.id, text="Sorry, I didn't understand that command. Use /help to see available commands.")
@@ -275,6 +293,9 @@ if __name__ == '__main__':
 
     view_limits_handler = CommandHandler('limits', view_limits)  
     application.add_handler(view_limits_handler)
+    
+    csv_handler = CommandHandler('export', export_csv)
+    application.add_handler(csv_handler)
 
     unknown_handler = MessageHandler(filters.COMMAND, unknown)
     application.add_handler(unknown_handler)
